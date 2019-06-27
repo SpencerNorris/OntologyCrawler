@@ -36,13 +36,13 @@ and the connected class (object) is then added to a local graph.
 from rdflib import Graph, URIRef
 from rdflib.namespace import RDFS, OWL
 from SPARQLWrapper import SPARQLWrapper, JSON, XML, N3, RDF
+
+from copy import deepcopy
 import sys
 import os
 
 ########## Globals ###############################################
 
-## Parameters for managing local graph
-graph = Graph() #Where we'll expand our ontologies
 
 #Parameters for guiding BioPortal class retrieval
 seen = set() #Classes that we've already expanded
@@ -51,11 +51,7 @@ BIOPORTAL_API_KEY = os.environ['BIOPORTAL_API_KEY']
 bioportal = SPARQLWrapper('http://sparql.bioontology.org/sparql/')
 bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
 
-#Predicates we're interested in expanding paths for
-PREDICATES = [ #predicates we'll recursively expand paths for 
-	RDFS.subClassOf,
-	OWL.equivalentClass
-]
+
 
 
 ########## Reporting Methods #############################################################################
@@ -200,9 +196,24 @@ def find_bioportal_subclasses(k):
 		bioportal_graph.add( (URIRef(result['sub']['value']), URIRef(result['pred']['value']), k) )
 
 
-########## Local Graph Crawling ####################################################################
+########## Graph Crawling ####################################################################
 
-def import_ontologies(graph, error=None):
+def retrieve_ontologies(graph, error=None, inplace=True):
+	'''
+	This method will recursively crawl owl:import statements,
+	starting with any statements present in graph.
+
+	'error' defines what to do in the event of the inability
+	to parse an ontology. If error=None, then the method will
+	fail quickly and raise an Exception. If error='ignore',
+	then the ontology will simply be ignored, as if it weren't
+	the object of an owl:imports call.
+
+	'inplace' determines what the method will return. If inplace=True,
+	then the input graph will be included alongside all imported ontologies.
+	If not, a graph containing only our imported ontologies will be returned.
+	'''
+	gout = Graph()
 	seen = set()
 	def _import_ontologies(g):
 		'''
@@ -210,11 +221,9 @@ def import_ontologies(graph, error=None):
 		querying for new import statements and
 		adding the read data to the global graph.
 		'''
-		nonlocal graph
+		nonlocal gout
 		nonlocal seen
-
-		#Add g to our graph
-		graph = graph + g
+		nonlocal error
 
 		#Retrieve all ontology imports
 		imports = g.query("""
@@ -240,6 +249,8 @@ def import_ontologies(graph, error=None):
 				try:
 					#If we successfully read our ontology, recurse
 					gin = Graph().parse(str(row[0]),format=form)
+					#Add g to our graph
+					gout = gout + gin
 					read_success = True
 					_import_ontologies(gin)
 					break
@@ -248,18 +259,24 @@ def import_ontologies(graph, error=None):
 
 			#If unable to parse ontology, decide how to handle error
 			if not read_success:
-				print("Exhausted format list.")
 				if error is None:
-					print("Failing quickly and exiting.")
-					sys.exit(1)
+					raise Exception("Exhausted format list. Failing quickly.")
 				if error == 'ignore':
-					print("Quietly ignoring failure.")
+					print("Exhausted format list. Quietly ignoring failure.")
 				
 	_import_ontologies(graph)
-	print(seen)
-	return graph
 
-def retrieve_enrichment_classes(seed, g):
+	#Return a graph containing our input graph and imports
+	if inplace:
+		return graph + gout
+	#Return a graph containing just the imports
+	else:
+		return gout
+
+
+def extract_paths(seed, graph, properties,verbose=False,down=True,up=True,shallow=None,up_shallow=True,down_shallow=True):
+	#TODO: Modify this so it returns a graph with all of the classes
+	# and instances in the property path without the ontologies.
 	'''
 	We're going to pull in all of the classes that are
 	accessible via a local import. That means any classes
@@ -267,80 +284,154 @@ def retrieve_enrichment_classes(seed, g):
 	imports, and any ontologies further up that chain.
 	'''
 
+	if shallow is not None:
+		up_shallow = shallow
+		down_shallow = shallow
+
 	#TODO: Modify SPARQL queries so that our list of predicates are used instead.
-	def _find_subclasses(k,g):
+	def __find_subclasses():
 		'''
 		We're only interested in finding depth-one subclasses.
 		Shouldn't be too difficult
 		'''
-		res = g.query("""
+		nonlocal graph
+		nonlocal seed
+		nonlocal down_shallow
+		res = graph.query("""
 			PREFIX owl: <http://www.w3.org/2002/07/owl#>
 			PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 			SELECT ?sub WHERE {
-				?sub (rdfs:subClassOf|owl:equivalentClass) <%s>.
+				?sub (rdfs:subClassOf|owl:equivalentClass)%s <%s>.
 			}
-			""" % (str(k),))
-		return [r[0] for r in res]
+			""" % ("" if down_shallow else "+", str(seed)))
+		return {r[0] for r in res}
 
-
-	#Retrieve superclass hierarchy for all seed classes
-	superclasses = set()
-	for s in seed:
-		s_res = g.query("""
+	def __find_superclasses():
+		#Retrieve superclass hierarchy for all seed classes
+		nonlocal graph
+		nonlocal seed
+		nonlocal up_shallow
+		superclasses = set()
+		res = graph.query("""
 			PREFIX owl: <http://www.w3.org/2002/07/owl#>
 			PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 			SELECT ?class WHERE{
-				<%s> (rdfs:subClassOf|owl:equivalentClass)+ ?class.
+				<%s> (rdfs:subClassOf|owl:equivalentClass)%s ?class.
 			}
-			""" % (str(s),))
-		for r in s_res:
+			""" % (str(seed), "" if up_shallow else "+"))
+		for r in res:
 			superclasses.add(r[0])
-	print("Full hierarchy size: ", len(set.union(seed, superclasses)))
-	print("Intersection of seed classes and extracted hierarchy: ", 
-		len(set.intersection(set(seed), superclasses))
-	)
-	print("Number of non-seed hierarchy classes: ",
-		len(superclasses) - len(set.intersection(seed, superclasses))
-	)
+		return superclasses
+
+	gout = Graph()
 
 	#Retrieve our subclasses
-	subclasses = {elem for elem in _find_subclasses(s,g) for s in seed}
-	print("Total immediate subclasses: ", len(subclasses))
+	if up:
+		superclasses = set(__find_superclasses())
+	if down:
+		subclasses = set(__find_subclasses())
+
+	if verbose:
+		print("Full hierarchy size: ", len(set.union(seed, superclasses)))
+		print("Intersection of seed classes and extracted hierarchy: ", 
+			len(set.intersection(set(seed), superclasses))
+		)
+		print("Number of non-seed hierarchy classes: ",
+			len(superclasses) - len(set.intersection(seed, superclasses))
+		)
+		print("Total immediate subclasses: ", len(subclasses))
 
 	return superclasses, subclasses
 
 
-
-############### Main Section ####################################################################
-
-def _retrieve_seed_classes(query):
+def _retrieve_seed_classes(graph,query):
 	'''
 	TODO: Implement some validation to make sure
 	that our query only retrieves one variable.
 	'''
-	global graph
 	return {row[0] for row in graph.query(query)}
 
 
-def expand_paths(graph,seed_query):
-	#Pull in CHEAR and full hierarchy of ontology imports
-	global seen
-	global bioportal_graph
+def retrieve_crawl_paths(graph,seed_query,properties,
+	expand_ontologies=True,verbose=False,inplace=False,
+	extract_params={'up' : True, 'down' : True, 'up_shallow' : False, 'down_shallow' : False}):
+	'''
+	Method for retrieving entity paths for the given
+	list of properties from the input graph, without including full ontology imports.
+
+	seed_query is a SPARQL query designating what classes from graph 
+	to use as root nodes when expanding the property paths.
+
+	Property paths is a list of properties to follow through the graph.
+	Note that all properties will be used at every level of recursion.
+	For example, assume our properties are [P1,P2]. Say that A connects to B with P1,
+	and that B connects to C with P2. In this case, the full path will be retrieved:
+
+	<A> <P1> <B>.
+	<B> <P2> <C>.
+
+	If the user only wants the one property along a given path, then they should call
+	this method twice: once for P1, and one for P2.
+
+	retrieve_paths(<P1>) --> <A> <P1> <B> .
+	retrieve_paths(<P2>) --> <B> <P2> <C> .
+
+	This method is configurable, with different flags which
+	will adjust its behavior:
+
+		- expand_ontologies: whether or not to recursively pull ontologies
+			referenced via owl:imports. This will recurse until
+			no more ontologies can be imported.
+
+		- inplace: If True, return a graph containing the input graph and retrieved data.
+			Otherwise, return a graph containing only the retrieved property paths.
+
+
+	The real value of this method is being able to walk property paths across multiple
+	ontologies without needing to keep them, e.g. expand_ontologies=True. Otherwise,
+	the property paths will only be retrieved for the input graph.
+
+	If the user wishes to add the full ontology tree to their graph, including all of
+	the property paths, they can instead call graph = retrieve_ontologies(graph,inplace=True) .
+	'''
+	#TODO: We want this to return a graph under a few different conditions:
+	#  We might want to return the original graph with ontologies included
+	#  We might want to return the original graph with just retrieved instances included
+	#  We might want to return a separate graph with just retrieved instances
+	#  We might want to return a separate graph with full ontologies loaded
 
 	#Collect the initial seed of classes to expand
-	seed = _retrieve_seed_classes(seed_query)
-	# print("Number of seed classes: ", len(seed))
-	# print("Sample classes: ")
-	# for i in range(10):
-	# 	print(list(seed)[i])
+	seed = _retrieve_seed_classes(graph,seed_query)
+	if verbose:
+		print("Number of seed classes: ", len(seed))
+		print("Sample classes: ")
+		for i in range(10):
+			print(list(seed)[i])
 
-	#Pull in ontology hierarchy, local class hierarchy
-	import_ontologies(graph)
-	show_ontologies()
-	local_super, local_sub = retrieve_enrichment_classes(seed,graph)
+	#Decide whether to pull in ontologies
+	if expand_ontologies:
+		ontology_graph = retrieve_ontologies(graph,inplace=False)
+		if verbose:
+			show_ontologies(graph + ontology_graph)
+	else:
+		ontology_graph = Graph()
+
+	#TODO: Temporary None keyword, replace with predicates
+	#TODO: add verbose information regarding retrieved entities
+	#Pull any property paths
+	entity_graph = Graph()
+	for s in seed:
+		entity_graph += extract_paths(s, graph + ontology_graph, None, **extract_params)
+
+	#Decide whether or not to lump everything into original graph
+	if inplace:
+		return graph + entity_graph
+	else:
+		return entity_graph
 
 
 def bioportal_expand_paths(graph,seed_query):
+	global bioportal_graph
 	seed = _retrieve_seed_classes(seed_query)
 
 	#Pull in BioPortal hierarchies
@@ -352,25 +443,38 @@ def bioportal_expand_paths(graph,seed_query):
 		find_bioportal_subclasses(s)
 		counter += 1
 	print("BioPortal superclasses retrieved.")
-	bio_super, bio_sub = retrieve_enrichment_classes(seed, bioportal_graph)
+	bio_super, bio_sub = extract_paths(seed, bioportal_graph, None, verbose=verbose, **extract_params)
 
+
+############### Main Section ####################################################################
 
 
 def expand(base_url, other_url):
 	pass
 
 if __name__ == '__main__':
+	#Predicates we're interested in expanding paths for
+	PREDICATES = [ #predicates we'll recursively expand paths for 
+		RDFS.subClassOf,
+		OWL.equivalentClass
+	]
 	CHEAR_LOCATION="/home/s/projects/TWC/chear-ontology/chear.ttl"
 	## This seed query will select all ChEBI classes present in CHEAR.
 	seed_query = """
-			PREFIX owl: <http://www.w3.org/2002/07/owl#>
-			SELECT DISTINCT ?c WHERE{
-				?c a owl:Class .
-				FILTER(regex(str(?c), "http://purl.obolibrary.org/obo/CHEBI"))
-			}
-			"""
+		PREFIX owl: <http://www.w3.org/2002/07/owl#>
+		SELECT DISTINCT ?c WHERE{
+			?c a owl:Class .
+			FILTER(regex(str(?c), "http://purl.obolibrary.org/obo/CHEBI"))
+		}
+		"""
 	graph = Graph()
 	graph.parse(CHEAR_LOCATION,format='turtle')
-	#expand_paths(graph, seed_query)
-	graph = import_ontologies(graph)
-	show_ontologies(graph)
+	# graph = retrieve_ontologies(graph, inplace=False)
+	extract_params = {
+		'up' : True, 
+		'down' : True, 
+		'up_shallow' : False, 
+		'down_shallow' : True, 
+		'verbose' : False
+	}
+	retrieve_crawl_paths(graph, seed_query, PREDICATES, verbose=True, inplace=True)
