@@ -41,17 +41,7 @@ import os
 
 ########## Globals ###############################################
 
-## This seed query will select all ChEBI classes present in CHEAR.
-SEED_QUERY=	"""
-		PREFIX owl: <http://www.w3.org/2002/07/owl#>
-		SELECT DISTINCT ?c WHERE{
-			?c a owl:Class .
-			FILTER(regex(str(?c), "http://purl.obolibrary.org/obo/CHEBI"))
-		}
-		"""
-
 ## Parameters for managing local graph
-CHEAR_LOCATION="/home/s/projects/TWC/chear-ontology/chear.ttl"
 graph = Graph() #Where we'll expand our ontologies
 
 #Parameters for guiding BioPortal class retrieval
@@ -75,11 +65,10 @@ They can be safely removed from the code base without any
 side effects, provided that their calls are removed from main().
 '''
 
-def show_ontologies():
+def show_ontologies(graph):
 	'''
 	Print list of all ontologies now present in Graph.
 	'''
-	global graph
 	all_res = graph.query("""
 		PREFIX owl: <http://www.w3.org/2002/07/owl#>
 		SELECT ?ont WHERE {
@@ -213,44 +202,62 @@ def find_bioportal_subclasses(k):
 
 ########## Local Graph Crawling ####################################################################
 
-#TODO: Modify so that only one local graph is necessary
-def import_ontologies(g):
-	'''
-	Recursively work over ontology imports,
-	querying for new import statements and
-	adding the read data to the global graph.
-	'''
-	global graph
+def import_ontologies(graph, error=None):
+	seen = set()
+	def _import_ontologies(g):
+		'''
+		Recursively work over ontology imports,
+		querying for new import statements and
+		adding the read data to the global graph.
+		'''
+		nonlocal graph
+		nonlocal seen
 
-	#Add g to our graph
-	graph = graph + g
+		#Add g to our graph
+		graph = graph + g
 
-	#Retrieve all ontology imports
-	imports = g.query("""
-		PREFIX owl: <http://www.w3.org/2002/07/owl#>
-		SELECT ?ont WHERE{
-		[] a owl:Ontology ; 
-		   owl:imports ?ont .
-		}
-		""")
+		#Retrieve all ontology imports
+		imports = g.query("""
+			PREFIX owl: <http://www.w3.org/2002/07/owl#>
+			SELECT ?ont WHERE{
+			[] a owl:Ontology ; 
+			   owl:imports ?ont .
+			}
+			""")
 
-	#Attempt to read in ontologies
-	for row in imports:
-		FORMATS=['xml','n3','nt','trix','rdfa']
-		read_success = False
-		for form in FORMATS:
-			try:
-				#If we successfully read our ontology, recurse
-				gin = Graph().parse(str(row[0]),format=form)
-				read_success = True
-				import_ontologies(gin)
-				break
-			except Exception as e:
-				pass
-				# print(e)
-		if not read_success:
-			print("Exhausted format list.")
-			sys.exit(1)
+		#Attempt to read in ontologies
+		for row in imports:
+			#Check whether we've already imported
+			if row[0] in seen:
+				continue
+			else:
+				seen.add(row[0])
+
+			#Import the ontology
+			FORMATS=['xml','n3','nt','trix','rdfa']
+			read_success = False
+			for form in FORMATS:
+				try:
+					#If we successfully read our ontology, recurse
+					gin = Graph().parse(str(row[0]),format=form)
+					read_success = True
+					_import_ontologies(gin)
+					break
+				except Exception as e:
+					pass
+
+			#If unable to parse ontology, decide how to handle error
+			if not read_success:
+				print("Exhausted format list.")
+				if error is None:
+					print("Failing quickly and exiting.")
+					sys.exit(1)
+				if error == 'ignore':
+					print("Quietly ignoring failure.")
+				
+	_import_ontologies(graph)
+	print(seen)
+	return graph
 
 def retrieve_enrichment_classes(seed, g):
 	'''
@@ -315,27 +322,26 @@ def _retrieve_seed_classes(query):
 	return {row[0] for row in graph.query(query)}
 
 
-def main():
+def expand_paths(graph,seed_query):
 	#Pull in CHEAR and full hierarchy of ontology imports
-	global CHEAR_LOCATION
-	global SEED_QUERY
-	global graph
 	global seen
 	global bioportal_graph
 
 	#Collect the initial seed of classes to expand
-	graph.parse(CHEAR_LOCATION,format='turtle')
-	seed = _retrieve_seed_classes(SEED_QUERY)
-	print("Number of seed classes: ", len(seed))
-	print("Sample classes: ")
-	for i in range(10):
-		print(list(seed)[i])
-	# seen.update(seed)
+	seed = _retrieve_seed_classes(seed_query)
+	# print("Number of seed classes: ", len(seed))
+	# print("Sample classes: ")
+	# for i in range(10):
+	# 	print(list(seed)[i])
 
 	#Pull in ontology hierarchy, local class hierarchy
 	import_ontologies(graph)
 	show_ontologies()
 	local_super, local_sub = retrieve_enrichment_classes(seed,graph)
+
+
+def bioportal_expand_paths(graph,seed_query):
+	seed = _retrieve_seed_classes(seed_query)
 
 	#Pull in BioPortal hierarchies
 	print("Seeding BioPortal superclasses.")
@@ -349,8 +355,22 @@ def main():
 	bio_super, bio_sub = retrieve_enrichment_classes(seed, bioportal_graph)
 
 
+
 def expand(base_url, other_url):
 	pass
 
 if __name__ == '__main__':
-	main()
+	CHEAR_LOCATION="/home/s/projects/TWC/chear-ontology/chear.ttl"
+	## This seed query will select all ChEBI classes present in CHEAR.
+	seed_query = """
+			PREFIX owl: <http://www.w3.org/2002/07/owl#>
+			SELECT DISTINCT ?c WHERE{
+				?c a owl:Class .
+				FILTER(regex(str(?c), "http://purl.obolibrary.org/obo/CHEBI"))
+			}
+			"""
+	graph = Graph()
+	graph.parse(CHEAR_LOCATION,format='turtle')
+	#expand_paths(graph, seed_query)
+	graph = import_ontologies(graph)
+	show_ontologies(graph)
