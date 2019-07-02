@@ -25,7 +25,7 @@ from urllib.parse import urlencode, quote_plus
 import traceback
 
 
-def find_bioportal_superclasses(k,i):
+def find_bioportal_superclasses(k,i,verbose=False):
 	'''
 	This is a recursive method that will move all
 	the way up the inheritance tree until we hit 
