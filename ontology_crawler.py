@@ -356,11 +356,8 @@ def retrieve_crawl_paths(graph,properties,
 
 
 
-############### Main Section ####################################################################
+############### Command Line Interface ####################################################################
 
-## TODO: Expand Paulo's base ontology requirement
-def expand(base_url, other_url):
-	pass
 
 if __name__ == '__main__':
 	#Predicates we're interested in expanding paths for

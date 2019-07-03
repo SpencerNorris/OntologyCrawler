@@ -11,26 +11,34 @@ prefix.
 
 import argparse
 
+from rdflib import Graph
+
 #Read in Java property file
-from jproperties import Properties
+import javaproperties
 
 #Home cookin' modules
-from 
+from ontology_crawler import retrieve_crawl_paths
+
+
+def expand(base_url, other_url):
+	pass
 
 def main(fin):
 	#Read in properties file
-	javaprops = Properties()
-	with open(fin,'r') as f:
-		javaprops.load(f, "utf-8")
-	print(javaprops)
+	with open(fin, 'r') as fp:
+		javaprops = javaproperties.load(fp)
+
+	for k in javaprops.keys():
+		print(javaprops[k].split(','))
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-
 	parser.add_argument(
 		'-f', '--file', type=str,
 		nargs='?', default=None,
 		help="Java properties file to read in. Must be set by user."
-	) 
-	main()
+	)
+
+	args = parser.parse_args()
+	main(args.file)
