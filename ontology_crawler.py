@@ -35,7 +35,7 @@ and the connected class (object) is then added to a local graph.
 
 from rdflib import Graph, URIRef
 from rdflib.namespace import RDFS, OWL
-from SPARQLWrapper import SPARQLWrapper, JSON, XML, N3, RDF
+# from SPARQLWrapper import SPARQLWrapper, JSON, XML, N3, RDF
 
 from copy import deepcopy
 import sys
@@ -279,8 +279,45 @@ def _retrieve_seed_classes(graph,query):
 	return {row[0] for row in graph.query(query)}
 
 
-def retrieve_crawl_paths(graph,properties,
-	seed_query=None,seed=None,
+def retrieve_crawl_paths_from_context(
+	seed_graph, 
+	context,
+	properties,
+	seed_query=None,
+	expand_ontologies=True,verbose=False,inplace=False,
+	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
+	'''
+	This is a wrapper method for retrieve_crawl_paths.
+	The only difference is that instead of expanding
+	the property paths within the main graph, the 
+	context will be used instead.
+
+	This is equivalent to manually extracting seed classes 
+	from seed_graph using the custom seed_query and
+	passing them alongside context to retrieve_crawl_paths().
+	'''
+	#Retrieve our seed classes
+	if seed_query is not None:
+		seeds = _retrieve_seed_classes(seed_graph,seed_query)
+	else:
+		raise Exception("Must pass seed query as parameter!")
+
+	#Perform the graph crawl within the context graph
+	return retrieve_crawl_paths(		
+		graph=context, 
+		properties=properties,
+		seed_query=None,
+		seeds=seeds, 
+		expand_ontologies=expand_ontologies,
+		verbose=verbose,
+		inplace=inplace, 
+		extract_params=extract_params)
+
+
+def retrieve_crawl_paths(
+	graph,
+	properties,
+	seed_query=None,seeds=None,
 	expand_ontologies=True,verbose=False,inplace=False,
 	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
 	'''
@@ -323,17 +360,20 @@ def retrieve_crawl_paths(graph,properties,
 	the property paths, they can instead call graph = retrieve_ontologies(graph,inplace=True) .
 	'''
 	#We want either a list of seeds or a seed query, not both
-	if (seed_query is None and seed is None) or (seed_query is not None and seed is not None):
+	if (seed_query is None and seeds is None) or (seed_query is not None and seeds is not None):
 		raise Exception("seed_query and seeds are mutually exclusive parameters. Please set exactly one.")
 
 	#Collect the initial seed of classes to expand
-	if not seed_query is None:
+	if seed_query is not None:
 		seeds = _retrieve_seed_classes(graph,seed_query)
 	if verbose:
-		print("Number of seed classes: ", len(seeds))
-		print("Sample classes: ")
-		for i in range(10):
-			print(list(seeds)[i])
+		if len(seeds) > 0:
+			print("Number of seed classes: ", len(seeds))
+			print("Sample classes: ")
+			for i in range(10):
+				print(list(seeds)[i])
+		else:
+			print("seed_query didn't retrieve any classes.")
 
 	#Decide whether to pull in ontologies
 	if expand_ontologies:
