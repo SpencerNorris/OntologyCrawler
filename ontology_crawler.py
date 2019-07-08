@@ -35,7 +35,6 @@ and the connected class (object) is then added to a local graph.
 
 from rdflib import Graph, URIRef
 from rdflib.namespace import RDFS, OWL
-# from SPARQLWrapper import SPARQLWrapper, JSON, XML, N3, RDF
 
 from copy import deepcopy
 import sys
@@ -132,6 +131,7 @@ def retrieve_ontologies(graph, error=None, inplace=True):
 
 			#If unable to parse ontology, decide how to handle error
 			if not read_success:
+				print("Failed to read " + row[0] + ".")
 				if error is None:
 					raise Exception("Exhausted format list. Failing quickly.")
 				if error == 'ignore':
@@ -391,6 +391,9 @@ def retrieve_crawl_paths(
 	#Pull any property paths
 	entity_graph = Graph()
 	entity_graph += extract_property_paths(seeds, graph + ontology_graph, properties, **extract_params)
+
+	#Cleanup
+	del ontology_graph
 
 	#Decide whether or not to lump everything into original graph
 	if inplace:
