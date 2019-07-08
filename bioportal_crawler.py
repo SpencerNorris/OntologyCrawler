@@ -3,9 +3,7 @@
 #Parameters for guiding BioPortal class retrieval
 seen = set() #Classes that we've already expanded
 bioportal_graph = Graph() #Where we'll expand the BioPortal results
-BIOPORTAL_API_KEY = os.environ['BIOPORTAL_API_KEY']
-bioportal = SPARQLWrapper('http://sparql.bioontology.org/sparql/')
-bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
+
 
 
 
@@ -17,15 +15,17 @@ bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
 
 ########## BioPortal Graph Crawling ####################################################################
 
-#Adapted from https://github.com/ncbo/sparql-code-examples/blob/master/python/sparql1.py
+
 
 import json
 import urllib
 from urllib.parse import urlencode, quote_plus
 import traceback
 
+import ontology_crawler
 
-def find_bioportal_superclasses(k,i,verbose=False):
+
+def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,upstream=True,verbose=False):
 	'''
 	This is a recursive method that will move all
 	the way up the inheritance tree until we hit 
@@ -42,20 +42,18 @@ def find_bioportal_superclasses(k,i,verbose=False):
 	k --> our class that we want to expand
 	klasses --> set of classes already expanded.
 	'''
-	global seen
-	global bioportal_graph
-	global PREDICATES
+	seen = set()
+	bioportal_graph = Graph()
 
-	def _query_next_level(k):
+	def _query_bioportal_downstream(k,bioportal,predicates):
 		'''
-		Retrieve the next level up of the predicate path
-		using the class k.
+		Retrieve the next level downstream of the predicate path
+		using the class k. Return a dictionary mapping
+		from the retrieved class names to the properties
+		by which they connect to k.
 		'''
-		global PREDICATES
-		global bioportal
-
-		#Construct filter so that we only retrieve predicates we're interested in 
-		filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in PREDICATES]) + ")"
+		#Construct filter and query BioPortal for paths
+		filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in predicates]) + ")"
 		query = """
 		SELECT DISTINCT ?pred ?kn WHERE {
 			<%s> ?pred ?kn.
@@ -66,35 +64,53 @@ def find_bioportal_superclasses(k,i,verbose=False):
 		bioportal.setReturnFormat(JSON)
 		results = bioportal.query().convert()
 
-		#Construct dictionary mapping superclasses to lists of connecting properties
-		final = {}
+		#Add results to graph
 		for result in results['results']['bindings']:
-			if not result['kn']['value'] in final.keys():
-				final[URIRef(result['kn']['value'])] = []
-			final[URIRef(result['kn']['value'])].append(URIRef(result['pred']['value']))
-		return final
+			pred = URIRef(result['pred']['value'])
+			k_n = URIRef(result['kn']['value'])
+			bioportal_graph.add( (k, pred, k_n) )
+		
+		#Return set of all downstream leaf nodes
+		return {URIRef(result['kn']['value']) for result in results['results']['bindings']}
 
-	print("Recursion level: ", i)
-	print("Node: ", str(k))
+	def _crawl_bioportal_downstream(k,i):
+		nonlocal seen_downstream
+		nonlocal verbose
+		nonlocal bioportal
+		nonlocal predicates
+		nonlocal bioportal_graph
 
-	#If we've already expanded this node, don't recurse
-	if str(k) in seen:
-		print("Already seen!")
-		return
-	else:				
-		#Note that we're about to expand the parent
-		print("Not seen, expanding...")
-		seen.add(str(k))
 
-	#Retrieve all parents, properties for connecting back to input class
-	parents = _query_next_level(k)
-	#Go over all of the classes that were retrieved, if any
-	for k_n in parents.keys():
-		#Add property connections to graph
-		for pred in parents[k_n]:
-			bioportal_graph.add((k,pred,k_n))
-		#Expand our next node
-		find_bioportal_superclasses(k_n,i+1)
+		if verbose:
+			print("Recursion level: ", i)
+			print("Node: ", str(k))
+
+		#If we've already expanded this node, don't recurse
+		if str(k) in seen:
+			if verbose:
+				print("Already seen!")
+			return
+		else:				
+			#Note that we're about to expand the parent
+			if verbose:
+				print("Not seen, expanding...")
+			seen.add(k)
+
+		#Retrieve all parents, properties for connecting back to input class
+		parents = _query_bioportal_downstream(k)
+		#Go over all of the classes that were retrieved, if any
+		for k_n in parents.keys():
+			#Expand our next node
+			_crawl_bioportal_downstream(k_n,i+1)
+
+
+	for k in seeds:
+		if downstream:
+			_crawl_bioportal_downstream(k,0)
+		#TODO: Implement!
+		# if upstream:
+		# 	_crawl_bioportal_upstream(k,0)
+	return bioportal_graph
 
 
 def find_bioportal_subclasses(k):
@@ -122,7 +138,7 @@ def find_bioportal_subclasses(k):
 
 def bioportal_expand_paths(graph,seed_query):
 	global bioportal_graph
-	seed = _retrieve_seed_classes(seed_query)
+	seed = ontology_crawler._retrieve_seed_classes(seed_query)
 
 	#Pull in BioPortal hierarchies
 	print("Seeding BioPortal superclasses.")
@@ -134,3 +150,12 @@ def bioportal_expand_paths(graph,seed_query):
 		counter += 1
 	print("BioPortal superclasses retrieved.")
 	bio_super, bio_sub = extract_property_paths(seed, bioportal_graph, None, verbose=verbose, **extract_params)
+
+
+
+
+if __name__ == '__main__':
+	#Adapted from https://github.com/ncbo/sparql-code-examples/blob/master/python/sparql1.py
+	BIOPORTAL_API_KEY = os.environ['BIOPORTAL_API_KEY']
+	bioportal = SPARQLWrapper('http://sparql.bioontology.org/sparql/')
+	bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
