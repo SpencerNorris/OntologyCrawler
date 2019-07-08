@@ -101,6 +101,7 @@ def extract_from_contexts(
 			properties=properties,
 			seed_query=SEED_QUERY_TEMPLATE % (prefix,),
 			expand_ontologies=True,
+			import_error='ignore',
 			verbose=verbose,
 			inplace=False,
 			extract_params=extract_params)

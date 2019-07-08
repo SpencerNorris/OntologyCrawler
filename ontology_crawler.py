@@ -286,7 +286,7 @@ def retrieve_crawl_paths_from_context(
 	context,
 	properties,
 	seed_query=None,
-	expand_ontologies=True,verbose=False,inplace=False,
+	expand_ontologies=True,import_error=None,verbose=False,inplace=False,
 	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
 	'''
 	This is a wrapper method for retrieve_crawl_paths.
@@ -313,6 +313,7 @@ def retrieve_crawl_paths_from_context(
 		seed_query=None,
 		seeds=seeds, 
 		expand_ontologies=expand_ontologies,
+		import_error=import_error,
 		verbose=verbose,
 		inplace=inplace, 
 		extract_params=extract_params)
@@ -322,7 +323,7 @@ def retrieve_crawl_paths(
 	graph,
 	properties,
 	seed_query=None,seeds=None,
-	expand_ontologies=True,verbose=False,inplace=False,
+	expand_ontologies=True,import_error=None,verbose=False,inplace=False,
 	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
 	'''
 	Method for retrieving entity paths for the given
@@ -382,7 +383,7 @@ def retrieve_crawl_paths(
 
 	#Decide whether to pull in ontologies
 	if expand_ontologies:
-		ontology_graph = retrieve_ontologies(graph,inplace=False)
+		ontology_graph = retrieve_ontologies(graph,inplace=False,error=import_error)
 		if verbose:
 			report_ontologies(ontology_graph)
 	else:
