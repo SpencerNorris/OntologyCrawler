@@ -1,10 +1,12 @@
+#!/usr/bin/env python
+# coding: utf-8
 
+import json
+import urllib
+from urllib.parse import urlencode, quote_plus
+import traceback
 
-#Parameters for guiding BioPortal class retrieval
-seen = set() #Classes that we've already expanded
-bioportal_graph = Graph() #Where we'll expand the BioPortal results
-
-
+from ontology_crawler import retrieve_seed_classes
 
 
 # def report_bioportal():
@@ -12,17 +14,6 @@ bioportal_graph = Graph() #Where we'll expand the BioPortal results
 # 	global bioportal_graph
 # 	#TODO: Expand with more information on 
 # 	print("Number of BioPortal superclasses: ", len(seen))
-
-########## BioPortal Graph Crawling ####################################################################
-
-
-
-import json
-import urllib
-from urllib.parse import urlencode, quote_plus
-import traceback
-
-import ontology_crawler
 
 
 def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,upstream=True,verbose=False):
@@ -45,13 +36,14 @@ def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,
 	seen = set()
 	bioportal_graph = Graph()
 
-	def _query_bioportal_downstream(k,bioportal,predicates):
+	def _query_bioportal_downstream(k):
 		'''
 		Retrieve the next level downstream of the predicate path
-		using the class k. Return a dictionary mapping
-		from the retrieved class names to the properties
-		by which they connect to k.
+		using the class k. Return a set of the leaf nodes.
 		'''
+		nonlocal bioportal
+		nonlocal predicates
+
 		#Construct filter and query BioPortal for paths
 		filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in predicates]) + ")"
 		query = """
@@ -73,20 +65,46 @@ def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,
 		#Return set of all downstream leaf nodes
 		return {URIRef(result['kn']['value']) for result in results['results']['bindings']}
 
+	def _query_bioportal_upstream(k,bioportal,predicates):
+		'''
+		Retrieve the next level upstream of the predicate path
+		using the class k. Return a set of the leaf nodes.
+		'''
+		nonlocal bioportal
+		nonlocal predicates
+
+		#Construct filter and query BioPortal for paths
+		filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in predicates]) + ")"
+		query = """
+		SELECT DISTINCT ?pred ?kn WHERE {
+			?kn ?pred <%s> .
+			%s
+		}
+		""" % (str(k),filter_str)
+		bioportal.setQuery(query)
+		bioportal.setReturnFormat(JSON)
+		results = bioportal.query().convert()
+
+		#Add results to graph
+		for result in results['results']['bindings']:
+			pred = URIRef(result['pred']['value'])
+			k_n = URIRef(result['kn']['value'])
+			bioportal_graph.add( (k_n, pred, k) )
+		
+		#Return set of all downstream leaf nodes
+		return {URIRef(result['kn']['value']) for result in results['results']['bindings']}
+
+
 	def _crawl_bioportal_downstream(k,i):
 		nonlocal seen_downstream
 		nonlocal verbose
-		nonlocal bioportal
-		nonlocal predicates
-		nonlocal bioportal_graph
 
-
+		#For sanity checks on BioPortal recursion
 		if verbose:
 			print("Recursion level: ", i)
 			print("Node: ", str(k))
-
 		#If we've already expanded this node, don't recurse
-		if str(k) in seen:
+		if str(k) in seen_downstream:
 			if verbose:
 				print("Already seen!")
 			return
@@ -94,7 +112,7 @@ def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,
 			#Note that we're about to expand the parent
 			if verbose:
 				print("Not seen, expanding...")
-			seen.add(k)
+			seen_downstream.add(k)
 
 		#Retrieve all parents, properties for connecting back to input class
 		parents = _query_bioportal_downstream(k)
@@ -103,42 +121,71 @@ def extract_bioportal_property_paths(seeds,bioportal,predicates,downstream=True,
 			#Expand our next node
 			_crawl_bioportal_downstream(k_n,i+1)
 
+	def _crawl_bioportal_upstream(k,i):
+		nonlocal seen_upstream
+		nonlocal verbose
+
+		#For sanity checks on BioPortal recursion
+		if verbose:
+			print("Recursion level: ", i)
+			print("Node: ", str(k))
+		#If we've already expanded this node, don't recurse
+		if str(k) in seen_upstream:
+			if verbose:
+				print("Already seen!")
+			return
+		else:				
+			#Note that we're about to expand the parent
+			if verbose:
+				print("Not seen, expanding...")
+			seen_upstream.add(k)
+
+		#Retrieve all parents, properties for connecting back to input class
+		parents = _query_bioportal_upstream(k)
+		#Go over all of the classes that were retrieved, if any
+		for k_n in parents.keys():
+			#Expand our next node
+			_crawl_bioportal_upstream(k_n,i+1)
+
 
 	for k in seeds:
 		if downstream:
+			if verbose:
+				print(k + ": crawling downstream.")
 			_crawl_bioportal_downstream(k,0)
-		#TODO: Implement!
-		# if upstream:
-		# 	_crawl_bioportal_upstream(k,0)
+		if upstream:
+			if verbose:
+				print(k + ": crawling upstream.")
+			_crawl_bioportal_upstream(k,0)
 	return bioportal_graph
 
 
-def find_bioportal_subclasses(k):
-	global bioportal
-	global bioportal_graph
-	global PREDICATES
+# def find_bioportal_subclasses(k):
+# 	global bioportal
+# 	global bioportal_graph
+# 	global PREDICATES
 
-	#Construct query with filter to select only predicates we're interested in
-	filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in PREDICATES]) + ")"
-	query = """
-		PREFIX owl: <http://www.w3.org/2002/07/owl#>
-		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-		SELECT ?pred ?sub WHERE {
-			?sub ?pred <%s>.
-			%s
-		}
-		""" % (str(k),filter_str)
-	res = bioportal.setQuery(query)
-	bioportal.setReturnFormat(JSON)
-	results = bioportal.query().convert()
-	#Dump results into BioPortal graph 
-	for result in results['results']['bindings']:
-		bioportal_graph.add( (URIRef(result['sub']['value']), URIRef(result['pred']['value']), k) )
+# 	#Construct query with filter to select only predicates we're interested in
+# 	filter_str = "FILTER(" + " || ".join(["?pred = <%s>" % (pred,) for pred in PREDICATES]) + ")"
+# 	query = """
+# 		PREFIX owl: <http://www.w3.org/2002/07/owl#>
+# 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+# 		SELECT ?pred ?sub WHERE {
+# 			?sub ?pred <%s>.
+# 			%s
+# 		}
+# 		""" % (str(k),filter_str)
+# 	res = bioportal.setQuery(query)
+# 	bioportal.setReturnFormat(JSON)
+# 	results = bioportal.query().convert()
+# 	#Dump results into BioPortal graph 
+# 	for result in results['results']['bindings']:
+# 		bioportal_graph.add( (URIRef(result['sub']['value']), URIRef(result['pred']['value']), k) )
 
 
 def bioportal_expand_paths(graph,seed_query):
 	global bioportal_graph
-	seed = ontology_crawler._retrieve_seed_classes(seed_query)
+	seed = _retrieve_seed_classes(seed_query)
 
 	#Pull in BioPortal hierarchies
 	print("Seeding BioPortal superclasses.")
