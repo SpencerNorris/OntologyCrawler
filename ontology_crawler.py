@@ -147,7 +147,7 @@ def retrieve_ontologies(graph, error=None, inplace=True):
 		return gout
 
 
-def extract_property_paths(seed, graph, properties,
+def extract_property_paths(seeds, graph, properties,
 	verbose=False,upstream=True,downstream=True,shallow=None,up_shallow=True,down_shallow=True):
 	'''
 	This method accepts a seed entity (either an instance or class),
@@ -259,11 +259,13 @@ def extract_property_paths(seed, graph, properties,
 
 
 	#Retrieve property paths
-	if upstream:
-		__find_upstream(seed)
-	if downstream:
-		__find_downstream(seed)
-
+	for seed in seeds:
+		if upstream:
+			__find_upstream(seed)
+			seen_upstream.add(seed)
+		if downstream:
+			__find_downstream(seed)
+			seen_downstream.add(seed)
 	if verbose:
 		print("Number of upstream classes retrieved: ", len(seen_upstream))
 		print("Number of downstream classes retrieved: ", len(seen_downstream))
@@ -301,6 +303,8 @@ def retrieve_crawl_paths_from_context(
 		seeds = _retrieve_seed_classes(seed_graph,seed_query)
 	else:
 		raise Exception("Must pass seed query as parameter!")
+	if verbose:
+		print("Seeds retrieved in retrieve_crawl_paths_from_context: ", len(seeds))
 
 	#Perform the graph crawl within the context graph
 	return retrieve_crawl_paths(		
@@ -364,13 +368,14 @@ def retrieve_crawl_paths(
 		raise Exception("seed_query and seeds are mutually exclusive parameters. Please set exactly one.")
 
 	#Collect the initial seed of classes to expand
-	if seed_query is not None:
+	if seed_query is not None and seeds is None:
 		seeds = _retrieve_seed_classes(graph,seed_query)
 	if verbose:
 		if len(seeds) > 0:
 			print("Number of seed classes: ", len(seeds))
 			print("Sample classes: ")
-			for i in range(10):
+			sample_size = 10 if len(seeds) >= 10 else len(seeds)
+			for i in range(sample_size):
 				print(list(seeds)[i])
 		else:
 			print("seed_query didn't retrieve any classes.")
@@ -385,8 +390,7 @@ def retrieve_crawl_paths(
 
 	#Pull any property paths
 	entity_graph = Graph()
-	for s in seeds:
-		entity_graph += extract_property_paths(s, graph + ontology_graph, properties, **extract_params)
+	entity_graph += extract_property_paths(seeds, graph + ontology_graph, properties, **extract_params)
 
 	#Decide whether or not to lump everything into original graph
 	if inplace:
