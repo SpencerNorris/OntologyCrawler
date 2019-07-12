@@ -36,7 +36,8 @@ def extract_from_contexts(
 	crawl paths in the associated context ontology. 
 	'''
 	seed_graph = Graph().parse(seed_iri)
-	print("Loaded seed graph.")
+	if verbose:
+		print("Loaded seed graph.")
 
 	SEED_QUERY_TEMPLATE = """
 		PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -49,21 +50,26 @@ def extract_from_contexts(
 	#Read in properties file
 	with open(property_f, 'r') as fp:
 		javaprops = javaproperties.load(fp)
-	print("Read properties file.")
+	if verbose:
+		print("Read properties file.")
 
+	#Iterate through rows of properties file
 	for k in javaprops.keys():
-		print("==========================================")
-		print("Reading graph: ", str(k))
+		if verbose:
+			print("==========================================")
+			print("Reading graph: ", str(k))
 		#Pull the ontology IRI and associated prefix
 		row = javaprops[k].split(',')
 		prefix = row[0]
 		iri = row[2]
 		#Check whether we have an IRI for the row
 		if iri == '':
-			print("No IRI provided.")
+			if verbose:
+				print("No IRI provided.")
 			continue
 		if iri == seed_iri:
-			print("Context graph is same as seed graph. Skipping.")
+			if verbose:
+				print("Context graph is same as seed graph. Skipping.")
 			continue
 
 		#Read in graph from IRI, use as context
@@ -75,19 +81,23 @@ def extract_from_contexts(
 				#If we successfully read our ontology, recurse
 				context = Graph().parse(iri,format=form)
 				read_success = True
-				print("Read as ", form, ".")
+				if verbose:
+					print("Read as ", form, ".")
 				break
 			except Exception as e:
 				pass
 		if not read_success:
 			#Last-ditch effort: try to guess the file extension
 			try:
-				print("Exhausted format list. Attempting to guess format...")
+				if verbose:
+					print("Exhausted format list. Attempting to guess format...")
 				context = Graph().parse(iri,format=guess_format(iri))
-				print("Read as ", guess_format(iri), ".")
+				if verbose:
+					print("Read as ", guess_format(iri), ".")
 				break
 			except Exception as e:
 				pass
+			#Error handling, quiet or fast failing
 			if error is None:
 				raise Exception("Exhausted format list. Failing quickly.")
 			if error == 'ignore':
@@ -101,7 +111,7 @@ def extract_from_contexts(
 			properties=properties,
 			seed_query=SEED_QUERY_TEMPLATE % (prefix,),
 			expand_ontologies=True,
-			import_error='ignore',
+			import_error=error,
 			verbose=verbose,
 			inplace=False,
 			extract_params=extract_params)
@@ -111,17 +121,17 @@ def extract_from_contexts(
 		print("Wrote out " + dest_dir + k + '.ttl.')
 		del gout
 
-			# try:
-			# 	#Attempt to write out our extracted property paths the canonical way
-			# 	gout.serialize(dest_dir + k + '.ttl',format='turtle')
-			# except Exception as e:
-			# 	#Sometimes rdflib barfs when we try to write out.
-			# 	#In this case, open a file and manually write out our triples
-			# 	print(e)
-			# 	print("Serialization failed. attempting iterative hack.")
-			# 	with open(dest_dir + k + '.ttl','w') as fout:
-			# 		for s,p,o in gout.triples((None,None,None)):
-			# 			#Try something!
+		# try:
+		# 	#Attempt to write out our extracted property paths the canonical way
+		# 	gout.serialize(dest_dir + k + '.ttl',format='turtle')
+		# except Exception as e:
+		# 	#Sometimes rdflib barfs when we try to write out.
+		# 	#In this case, open a file and manually write out our triples
+		# 	print(e)
+		# 	print("Serialization failed. attempting iterative hack.")
+		# 	with open(dest_dir + k + '.ttl','w') as fout:
+		# 		for s,p,o in gout.triples((None,None,None)):
+		# 			#Try something!
 
 
 
@@ -157,4 +167,5 @@ if __name__ == '__main__':
 		property_f=args.file,
 		verbose=True,
 		extract_params=extract_params,
-		dest_dir=args.dest)
+		dest_dir=args.dest,
+		error='ignore')
