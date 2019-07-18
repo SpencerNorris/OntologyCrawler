@@ -34,8 +34,7 @@ and the connected class (object) is then added to a local graph.
 # can be used to store results.
 
 from rdflib import Graph, URIRef
-from rdflib.namespace import RDFS, OWL
-from SPARQLWrapper import SPARQLWrapper, JSON, XML, N3, RDF
+from rdflib.namespace import RDF, RDFS, OWL
 
 from copy import deepcopy
 import sys
@@ -132,6 +131,7 @@ def retrieve_ontologies(graph, error=None, inplace=True):
 
 			#If unable to parse ontology, decide how to handle error
 			if not read_success:
+				print("Failed to read " + row[0] + ".")
 				if error is None:
 					raise Exception("Exhausted format list. Failing quickly.")
 				if error == 'ignore':
@@ -147,7 +147,7 @@ def retrieve_ontologies(graph, error=None, inplace=True):
 		return gout
 
 
-def extract_property_paths(seed, graph, properties,
+def extract_property_paths(seeds, graph, properties,
 	verbose=False,upstream=True,downstream=True,shallow=None,up_shallow=True,down_shallow=True):
 	'''
 	This method accepts a seed entity (either an instance or class),
@@ -223,7 +223,7 @@ def extract_property_paths(seed, graph, properties,
 			downstream = r[1]
 			gout.add((entity,prop,downstream))
 			#Skip if we've seen the node, or only want depth=1
-			if downstream in seen_downstream or down_shallow:
+			if down_shallow or downstream in seen_downstream:
 				continue
 			else:
 				seen_downstream.add(downstream)
@@ -251,7 +251,7 @@ def extract_property_paths(seed, graph, properties,
 			prop = r[1]
 			gout.add((upstream, prop, entity))
 			#Skip if we've seen the node, or only want depth=1
-			if upstream in seen_upstream or up_shallow:
+			if up_shallow or upstream in seen_upstream:
 				continue
 			else:
 				seen_upstream.add(upstream)
@@ -259,11 +259,13 @@ def extract_property_paths(seed, graph, properties,
 
 
 	#Retrieve property paths
-	if upstream:
-		__find_upstream(seed)
-	if downstream:
-		__find_downstream(seed)
-
+	for seed in seeds:
+		if upstream:
+			__find_upstream(seed)
+			seen_upstream.add(seed)
+		if downstream:
+			__find_downstream(seed)
+			seen_downstream.add(seed)
 	if verbose:
 		print("Number of upstream classes retrieved: ", len(seen_upstream))
 		print("Number of downstream classes retrieved: ", len(seen_downstream))
@@ -279,9 +281,49 @@ def _retrieve_seed_classes(graph,query):
 	return {row[0] for row in graph.query(query)}
 
 
-def retrieve_crawl_paths(graph,properties,
-	seed_query=None,seed=None,
-	expand_ontologies=True,verbose=False,inplace=False,
+def retrieve_crawl_paths_from_context(
+	seed_graph, 
+	context,
+	properties,
+	seed_query=None,
+	expand_ontologies=True,import_error=None,verbose=False,inplace=False,
+	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
+	'''
+	This is a wrapper method for retrieve_crawl_paths.
+	The only difference is that instead of expanding
+	the property paths within the main graph, the 
+	context will be used instead.
+
+	This is equivalent to manually extracting seed classes 
+	from seed_graph using the custom seed_query and
+	passing them alongside context to retrieve_crawl_paths().
+	'''
+	#Retrieve our seed classes
+	if seed_query is not None:
+		seeds = _retrieve_seed_classes(seed_graph,seed_query)
+	else:
+		raise Exception("Must pass seed query as parameter!")
+	if verbose:
+		print("Seeds retrieved in retrieve_crawl_paths_from_context: ", len(seeds))
+
+	#Perform the graph crawl within the context graph
+	return retrieve_crawl_paths(		
+		graph=context, 
+		properties=properties,
+		seed_query=None,
+		seeds=seeds, 
+		expand_ontologies=expand_ontologies,
+		import_error=import_error,
+		verbose=verbose,
+		inplace=inplace, 
+		extract_params=extract_params)
+
+
+def retrieve_crawl_paths(
+	graph,
+	properties,
+	seed_query=None,seeds=None,
+	expand_ontologies=True,import_error=None,verbose=False,inplace=False,
 	extract_params={'upstream' : True, 'downstream' : True, 'up_shallow' : True, 'down_shallow' : True}):
 	'''
 	Method for retrieving entity paths for the given
@@ -323,30 +365,45 @@ def retrieve_crawl_paths(graph,properties,
 	the property paths, they can instead call graph = retrieve_ontologies(graph,inplace=True) .
 	'''
 	#We want either a list of seeds or a seed query, not both
-	if (seed_query is None and seed is None) or (seed_query is not None and seed is not None):
+	if (seed_query is None and seeds is None) or (seed_query is not None and seeds is not None):
 		raise Exception("seed_query and seeds are mutually exclusive parameters. Please set exactly one.")
 
 	#Collect the initial seed of classes to expand
-	if not seed_query is None:
+	if seed_query is not None and seeds is None:
 		seeds = _retrieve_seed_classes(graph,seed_query)
 	if verbose:
-		print("Number of seed classes: ", len(seeds))
-		print("Sample classes: ")
-		for i in range(10):
-			print(list(seeds)[i])
+		if len(seeds) > 0:
+			print("Number of seed classes: ", len(seeds))
+			print("Sample classes: ")
+			sample_size = 10 if len(seeds) >= 10 else len(seeds)
+			for i in range(sample_size):
+				print(list(seeds)[i])
+		else:
+			print("seed_query didn't retrieve any classes.")
 
 	#Decide whether to pull in ontologies
 	if expand_ontologies:
-		ontology_graph = retrieve_ontologies(graph,inplace=False)
+		ontology_graph = retrieve_ontologies(graph,inplace=False,error=import_error)
 		if verbose:
 			report_ontologies(ontology_graph)
 	else:
 		ontology_graph = Graph()
 
-	#Pull any property paths
+	#Add owl:Class declarations, pull any property paths
 	entity_graph = Graph()
+	#TODO: add contextual Class declaration (e.g. only if it's actually a class)
+	# We don't want this to only work on owl:Classes!
 	for s in seeds:
-		entity_graph += extract_property_paths(s, graph + ontology_graph, properties, **extract_params)
+		entity_graph.add((s,RDF.type,OWL.Class))
+	entity_graph += extract_property_paths(
+		seeds,
+		graph + ontology_graph, 
+		properties, 
+		#verbose=verbose, 
+		**extract_params)
+
+	#Cleanup
+	del ontology_graph
 
 	#Decide whether or not to lump everything into original graph
 	if inplace:
@@ -356,11 +413,8 @@ def retrieve_crawl_paths(graph,properties,
 
 
 
-############### Main Section ####################################################################
+############### Command Line Interface ####################################################################
 
-## TODO: Expand Paulo's base ontology requirement
-def expand(base_url, other_url):
-	pass
 
 if __name__ == '__main__':
 	#Predicates we're interested in expanding paths for
