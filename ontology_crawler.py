@@ -34,7 +34,7 @@ and the connected class (object) is then added to a local graph.
 # can be used to store results.
 
 from rdflib import Graph, URIRef
-from rdflib.namespace import RDFS, OWL
+from rdflib.namespace import RDF, RDFS, OWL
 
 from copy import deepcopy
 import sys
@@ -223,7 +223,7 @@ def extract_property_paths(seeds, graph, properties,
 			downstream = r[1]
 			gout.add((entity,prop,downstream))
 			#Skip if we've seen the node, or only want depth=1
-			if downstream in seen_downstream or down_shallow:
+			if down_shallow or downstream in seen_downstream:
 				continue
 			else:
 				seen_downstream.add(downstream)
@@ -251,7 +251,7 @@ def extract_property_paths(seeds, graph, properties,
 			prop = r[1]
 			gout.add((upstream, prop, entity))
 			#Skip if we've seen the node, or only want depth=1
-			if upstream in seen_upstream or up_shallow:
+			if up_shallow or upstream in seen_upstream:
 				continue
 			else:
 				seen_upstream.add(upstream)
@@ -389,9 +389,18 @@ def retrieve_crawl_paths(
 	else:
 		ontology_graph = Graph()
 
-	#Pull any property paths
+	#Add owl:Class declarations, pull any property paths
 	entity_graph = Graph()
-	entity_graph += extract_property_paths(seeds, graph + ontology_graph, properties, **extract_params)
+	#TODO: add contextual Class declaration (e.g. only if it's actually a class)
+	# We don't want this to only work on owl:Classes!
+	for s in seeds:
+		entity_graph.add((s,RDF.type,OWL.Class))
+	entity_graph += extract_property_paths(
+		seeds,
+		graph + ontology_graph, 
+		properties, 
+		#verbose=verbose, 
+		**extract_params)
 
 	#Cleanup
 	del ontology_graph

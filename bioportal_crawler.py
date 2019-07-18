@@ -11,7 +11,7 @@ import os
 import json
 import traceback
 from rdflib import Graph, URIRef
-from rdflib.namespace import RDFS, OWL
+from rdflib.namespace import RDF, RDFS, OWL
 from SPARQLWrapper import SPARQLWrapper, JSON
 
 
@@ -34,10 +34,6 @@ def extract_bioportal_property_paths(
 	The recursion should follow the path of a directed
 	acyclic graph, with one sink node, owl:Thing.
 
-	It's possible that we wind up with cycles; in order
-	to deal with this, we're going to maintain a set
-	containing all of our classes which we've already
-	expanded, called 'klasses'.
 
 	params:
 	k --> our class that we want to expand
@@ -224,6 +220,8 @@ def bioportal_retrieve_crawl_paths(
 		raise Exception("seed_query and seeds are mutually exclusive parameters. Please set exactly one.")
 
 	#Collect the initial seed of classes to expand
+	# This will look on BioPortal for the classes;
+	# for local extracts you will want to pass a 'seeds' parameter.
 	if seed_query is not None and seeds is None:
 		seeds = _bioportal_retrieve_seed_classes(bioportal,seed_query)
 	if verbose:
@@ -236,12 +234,19 @@ def bioportal_retrieve_crawl_paths(
 		else:
 			print("seed_query didn't retrieve any classes.")
 
-	return extract_bioportal_property_paths(
-		seeds=seeds,
-		bioportal=bioportal,
-		properties=properties,
-		verbose=verbose,
-		**extract_params)
+	#Add class declarations to graph
+	entity_graph = Graph()
+	#TODO: add contextual Class declaration (e.g. only if it's actually a class)
+	# We don't want this to only work on owl:Classes!
+	for s in seeds:
+		entity_graph.add((s,RDF.type,OWL.Class))
+
+	return entity_graph + extract_bioportal_property_paths(
+							seeds=seeds,
+							bioportal=bioportal,
+							properties=properties,
+							verbose=verbose,
+							**extract_params)
 
 
 
@@ -284,4 +289,4 @@ if __name__ == '__main__':
 		verbose=True,
 		extract_params=extract_params)
 	#Write out!
-	graph.serialize('./data/extracts/bioportal.ttl',format='turtle')
+	graph.serialize('./data/extracts/chebi_bioportal.ttl',format='turtle')

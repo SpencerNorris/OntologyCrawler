@@ -8,16 +8,18 @@ property paths for classes with the given
 prefix.
 '''
 
-
-import argparse
 from rdflib import Graph
+from SPARQLWrapper import SPARQLWrapper, JSON
 from rdflib.util import guess_format
-from rdflib.namespace import RDFS, OWL
+from rdflib.namespace import RDF, RDFS, OWL
 import javaproperties
+from os import path
+import argparse
+import os
 
 #Home cookin' modules
 from ontology_crawler import retrieve_crawl_paths_from_context
-
+from bioportal_crawler import bioportal_retrieve_crawl_paths
 
 
 def extract_from_contexts(
@@ -35,10 +37,18 @@ def extract_from_contexts(
 	These seed entities are then used as roots for the property 
 	crawl paths in the associated context ontology. 
 	'''
+	#Read in the graph we'll pull seeds from
 	seed_graph = Graph().parse(seed_iri)
 	if verbose:
 		print("Loaded seed graph.")
 
+	#Connect to BioPortal
+	BIOPORTAL_API_KEY = os.environ['BIOPORTAL_API_KEY']
+	bioportal = SPARQLWrapper('http://sparql.bioontology.org/sparql/')
+	bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
+	print("Connected to BioPortal.")
+
+	#Create template for retrieving seed classes based on prefixes
 	SEED_QUERY_TEMPLATE = """
 		PREFIX owl: <http://www.w3.org/2002/07/owl#>
 		SELECT DISTINCT ?c WHERE{
@@ -72,7 +82,7 @@ def extract_from_contexts(
 				print("Context graph is same as seed graph. Skipping.")
 			continue
 
-		#Read in graph from IRI, use as context
+		#Read in context graph from IRI, use as context
 		context = Graph()
 		FORMATS=['xml','n3','nt','trix','turtle','rdfa']
 		read_success = False
@@ -116,9 +126,19 @@ def extract_from_contexts(
 			inplace=False,
 			extract_params=extract_params)
 
+		#Get the BioPortal extract as well
+		bio_seeds = {row[0] for row in seed_graph.query(SEED_QUERY_TEMPLATE % (prefix,))}
+		bio_gout = bioportal_retrieve_crawl_paths(
+			properties=properties,
+			bioportal=bioportal,
+			seeds=bio_seeds,
+			verbose=verbose,
+			extract_params=extract_params)
+
 		#Write out
-		gout.serialize(dest_dir + k + '.ttl',format='turtle')
-		print("Wrote out " + dest_dir + k + '.ttl.')
+		gout.serialize(path.join(dest_dir,k + '.ttl'),format='turtle')
+		bio_gout.serialize(path.join(path.join(dest_dir,'bioportal/'), k + '_bioportal.ttl'),format='turtle')
+		print("Wrote out extracts for " + k + ".")
 		del gout
 
 		# try:
