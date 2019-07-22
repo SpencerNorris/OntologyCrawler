@@ -202,7 +202,7 @@ def extract_property_paths(seeds, graph, properties,
 	def __find_downstream(entity):
 		nonlocal graph
 		nonlocal gout
-		nonlocal up_shallow
+		nonlocal down_shallow
 		nonlocal seen_downstream
 
 		#Retrieve next set of nodes in tree with edge labels
@@ -230,7 +230,7 @@ def extract_property_paths(seeds, graph, properties,
 	def __find_upstream(entity):
 		nonlocal graph
 		nonlocal gout
-		nonlocal down_shallow
+		nonlocal up_shallow
 		nonlocal seen_upstream
 
 		#Retrieve next set of nodes in tree with edge labels
