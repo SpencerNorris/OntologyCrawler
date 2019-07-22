@@ -191,18 +191,6 @@ def extract_bioportal_property_paths(
 	return bioportal_graph
 
 
-def _bioportal_retrieve_seed_classes(bioportal,seed_query):
-	#Perform setup for SPARQLWrapper query, execute
-	bioportal.setQuery(seed_query)
-	bioportal.setReturnFormat(JSON)
-	results = bioportal.query().convert()
-	#There should only be one variable retreived,
-	#  so this should work
-	print(results)
-	key = results['head']['vars'][0]
-	#Return results
-	return {result[key]['value'] for result in results['results']['bindings']}
-
 
 def bioportal_retrieve_crawl_paths(
 	properties,
@@ -215,6 +203,19 @@ def bioportal_retrieve_crawl_paths(
 	then passes the results into extract_bioportal_property_paths.
 	Basically just a convenience method that will imitate 
 	'''
+	#Helper method
+	def _bioportal_retrieve_seed_classes(bioportal,seed_query):
+		#Perform setup for SPARQLWrapper query, execute
+		bioportal.setQuery(seed_query)
+		bioportal.setReturnFormat(JSON)
+		results = bioportal.query().convert()
+		#There should only be one variable retreived,
+		#  so this should work
+		key = results['head']['vars'][0]
+		#Return results
+		return {result[key]['value'] for result in results['results']['bindings']}
+
+
 	#We want either a list of seeds or a seed query, not both
 	if (seed_query is None and seeds is None) or (seed_query is not None and seeds is not None):
 		raise Exception("seed_query and seeds are mutually exclusive parameters. Please set exactly one.")
@@ -234,13 +235,7 @@ def bioportal_retrieve_crawl_paths(
 		else:
 			print("seed_query didn't retrieve any classes.")
 
-	#Add class declarations to graph
 	entity_graph = Graph()
-	#TODO: add contextual Class declaration (e.g. only if it's actually a class)
-	# We don't want this to only work on owl:Classes!
-	for s in seeds:
-		entity_graph.add((s,RDF.type,OWL.Class))
-
 	return entity_graph + extract_bioportal_property_paths(
 							seeds=seeds,
 							bioportal=bioportal,
@@ -255,7 +250,6 @@ if __name__ == '__main__':
 	BIOPORTAL_API_KEY = os.environ['BIOPORTAL_API_KEY']
 	bioportal = SPARQLWrapper('http://sparql.bioontology.org/sparql/')
 	bioportal.addCustomParameter("apikey", BIOPORTAL_API_KEY)
-
 
 	#We're going to use CHEAR as the base context
 	CHEAR_LOCATION="/home/s/projects/TWC/chear-ontology/chear.ttl"
@@ -273,6 +267,7 @@ if __name__ == '__main__':
 
 	#Setup for recursive ChEBI superclass retrieval, shallow subclass retrieval
 	PREDICATES = [ #predicates we'll recursively expand paths for 
+		RDF.type,
 		RDFS.subClassOf,
 		OWL.equivalentClass
 	]

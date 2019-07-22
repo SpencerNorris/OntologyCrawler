@@ -171,6 +171,7 @@ if __name__ == '__main__':
 	#Use CHEAR as our base graph
 	SEED_IRI = 'http://hadatac.org/ont/chear/'
 	PREDICATES = [ #predicates we'll recursively expand paths for 
+		RDF.type,
 		RDFS.subClassOf,
 		OWL.equivalentClass
 	]

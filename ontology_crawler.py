@@ -40,7 +40,7 @@ from copy import deepcopy
 import sys
 import os
 
-
+#5183781806
 ########## Reporting Methods #############################################################################
 '''
 These are only used to display information about our results. 
@@ -389,12 +389,8 @@ def retrieve_crawl_paths(
 	else:
 		ontology_graph = Graph()
 
-	#Add owl:Class declarations, pull any property paths
+	#Extract property paths
 	entity_graph = Graph()
-	#TODO: add contextual Class declaration (e.g. only if it's actually a class)
-	# We don't want this to only work on owl:Classes!
-	for s in seeds:
-		entity_graph.add((s,RDF.type,OWL.Class))
 	entity_graph += extract_property_paths(
 		seeds,
 		graph + ontology_graph, 
@@ -419,6 +415,7 @@ def retrieve_crawl_paths(
 if __name__ == '__main__':
 	#Predicates we're interested in expanding paths for
 	PREDICATES = [ #predicates we'll recursively expand paths for 
+		RDF.type,
 		RDFS.subClassOf,
 		OWL.equivalentClass
 	]
