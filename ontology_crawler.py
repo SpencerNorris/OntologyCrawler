@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 '''
 File: pipeline.py
@@ -36,11 +37,7 @@ and the connected class (object) is then added to a local graph.
 from rdflib import Graph, URIRef
 from rdflib.namespace import RDF, RDFS, OWL
 
-from copy import deepcopy
-import sys
-import os
 
-#5183781806
 ########## Reporting Methods #############################################################################
 '''
 These are only used to display information about our results. 
