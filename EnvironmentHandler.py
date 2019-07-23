@@ -7,14 +7,27 @@ from SPARQLWrapper import SPARQLWrapper, JSON
 
 
 class EnvironmentHandlerFactory:
+	'''
+	Simple Factory class designed to handle different types
+	of input Environments and return appropriate EnvironmentHandlers
+	that can be generically manipulated in other segments of the 
+	code base with no loss of functionality. For now, the list of
+	valid input Environments for the EnvironmentHandlerFactory
+	are as follows:
+	- rdflib.graph.Graph
+	- SPARQLWrapper.SPARQLWrapper
+	'''
 	def createEnvironmentHander(self,environment):
-		if type(environment) == Graph:
-			return RDFLibGraphEnvironmentHandler(environment)
-		elif type(environment) == SPARQLWrapper:
-			return SPARQLWrapperEnvironmentHandler(environment)
-		else:
+		TYPE_MAP = {
+			Graph : RDFLibGraphEnvironmentHandler,
+			SPARQLWrapper : SPARQLWrapperEnvironmentHandler
+		}
+		if not type(environment) in VALID_TYPES.keys():
 			raise Exception("Environment type ", type(environment), 
 							" is invalid; must be either rdflib.Graph.Graph or SPARQLWrapper.")
+		else:
+			return TYPE_MAP[type(environment)](environment=environment)
+
 
 class EnvironmentHandler(ABC):
 	def __init__(self,environment):
@@ -38,6 +51,7 @@ class RDFLibGraphEnvironmentHandler(EnvironmentHandler):
 		super(RDFLibGraphEnvironmentHandler, self).__init__(environment)
 
 	def query(self,q):
+		pass
 
 	def load_from_iri(self,iri):
 		'''
@@ -80,10 +94,10 @@ class SPARQLWrapperEnvironmentHandler(EnvironmentHandler):
 		results = self.environment.query()
 		return self.environment
  
- 	def drop_graph(self,iri):
- 		query = """
- 		DROP <%s>
- 		""" % (iri,)
- 		self.environment.setQuery(query)
+	def drop_graph(self,iri):
+		query = """
+		DROP <%s>
+		""" % (iri,)
+		self.environment.setQuery(query)
 		results = self.environment.query()
 		return self.environment
